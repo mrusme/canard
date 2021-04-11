@@ -21,6 +21,14 @@ import (
 
 var VERSION string
 
+type CanardItem struct {
+  *Item
+  Markdown                   string
+  PlainText                  string
+  FeedID                     int
+  FeedTitle                  string
+}
+
 type Canard struct {
   App                        *tview.Application
   FeedSwitcher               *tview.DropDown
@@ -29,6 +37,13 @@ type Canard struct {
 
   ApiURL                     string
   ApiKey                     string
+
+  Feeds                      []Feed
+
+  Items                      []CanardItem
+  ItemsMap                   map[int]int
+
+  CurrentFeedID              int
 }
 
 type Item struct {
@@ -37,8 +52,6 @@ type Item struct {
   Title                      string  `json:"title"`
   URL                        string  `json:"url"`
   HTML                       string  `json:"html"`
-  Markdown                   string
-  PlainText                  string
   CreatedOnTime              int     `json:"created_on_time"`
   IsRead                     int     `json:"is_read"`
   IsSaved                    int     `json:"is_saved"`
@@ -61,7 +74,10 @@ type ApiResponse struct {
 }
 
 func main() {
-  canard := Canard{}
+  canard := Canard{
+    ItemsMap: make(map[int]int),
+    CurrentFeedID: -1,
+  }
   canard.ApiURL = LookupStrEnv("CANARD_API_URL", "http://127.0.0.1:8000/fever/")
   canard.ApiKey = LookupStrEnv("CANARD_API_KEY", "9a0f36d70a22b40baa26f3df113cd9eb")
 
@@ -97,25 +113,8 @@ func main() {
     AddItem(canard.FeedSwitcher, 0, 0, 1, 1, 0, 0, true).
     AddItem(canard.ItemsList, 1, 0, 1, 1, 0, 0, false)
 
-  apiResponse, err := call(canard.ApiKey, canard.ApiURL + "?api&feeds&items")
-  if err != nil {
-    panic(err)
-  }
-
-  for _, feed := range apiResponse.Feeds {
-    canard.FeedSwitcher.AddOption(feed.Title, nil)
-  }
-
-  converter := md.NewConverter("", true, nil)
-  for _, item := range apiResponse.Items {
-    item.Markdown, err = converter.ConvertString(item.HTML)
-    if err != nil {
-      log.Fatal(err)
-    }
-    item.PlainText = strings.TrimSpace(html.UnescapeString(strip.StripTags(item.HTML)))
-    canard.ItemsList.AddItem(item.Title, item.PlainText, 0, nil)
-  }
-  canard.ItemsList.SetCurrentItem(0)
+  canard.Refresh()
+  canard.RefreshUI()
 
   // canard.App.SetFocus(canard.FeedSwitcher)
   if err := canard.App.SetRoot(canard.Grid, true).Run(); err != nil {
@@ -155,4 +154,77 @@ func call(apiKey string, urlPath string) (ApiResponse, error) {
   }
 
   return response, nil
+}
+
+func (canard *Canard) Refresh() () {
+  apiResponse, err := call(canard.ApiKey, canard.ApiURL + "?api&feeds&items")
+  if err != nil {
+    panic(err)
+  }
+
+  var feedMap = make(map[int]Feed)
+
+  for _, feed := range apiResponse.Feeds {
+    feedMap[feed.ID] = feed
+  }
+
+  canard.Feeds = apiResponse.Feeds
+
+  converter := md.NewConverter("", true, nil)
+  itemsLen := len(apiResponse.Items)
+  for i := (itemsLen - 1); i >= 0; i-- {
+    item := apiResponse.Items[i]
+    _, exists := canard.ItemsMap[item.ID]
+    if exists == true {
+      continue
+    }
+
+    markdown, err := converter.ConvertString(item.HTML)
+    if err != nil {
+      log.Fatal(err)
+    }
+
+    canardItem := CanardItem{
+      &item,
+      markdown,
+      strings.TrimSpace(html.UnescapeString(strip.StripTags(item.HTML))),
+      feedMap[item.FeedID].ID,
+      feedMap[item.FeedID].Title,
+    }
+
+    canard.ItemsMap[item.ID] = len(canard.Items)
+    canard.Items = append(canard.Items, canardItem)
+  }
+}
+
+func (canard *Canard) Switch(feedTitle string) (bool) {
+  for _, feed := range canard.Feeds {
+    if feedTitle == feed.Title {
+      canard.CurrentFeedID = feed.ID
+      return true
+    }
+  }
+
+  return false
+}
+
+func (canard *Canard) RefreshUI() (bool) {
+  canard.FeedSwitcher.SetOptions([]string{"All"}, nil)
+
+  for i := 0; i < len(canard.Feeds); i++ {
+    feed := canard.Feeds[i]
+    canard.FeedSwitcher.AddOption(feed.Title, nil)
+
+    if canard.CurrentFeedID == feed.ID {
+      canard.FeedSwitcher.SetCurrentOption(i)
+    }
+  }
+
+  canard.ItemsList.Clear()
+  for _, item := range canard.Items {
+    canard.ItemsList.AddItem(item.Title, item.FeedTitle, 0, nil)
+  }
+
+  canard.ItemsList.SetCurrentItem(-1)
+  return true
 }

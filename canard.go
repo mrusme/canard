@@ -1,8 +1,11 @@
 package main
 
 import (
+  "fmt"
   "log"
   "strings"
+  "regexp"
+  "strconv"
 
   "github.com/gdamore/tcell/v2"
   "github.com/rivo/tview"
@@ -10,10 +13,23 @@ import (
   "github.com/JohannesKaufmann/html-to-markdown"
   "github.com/grokify/html-strip-tags-go"
   "html"
-  // "github.com/charmbracelet/glamour"
+  "github.com/charmbracelet/glamour"
+
+  "image/color"
+  "github.com/eliukblau/pixterm/pkg/ansimage"
 )
 
 var VERSION string
+var MdImgRegex =
+  regexp.MustCompile(`(?m)!\[(.*)\]\((.+)\)`)
+var MdImgPlaceholderRegex =
+  regexp.MustCompile(`(?m) 🖼([0-9]*)\$`)
+
+
+type InlineImage struct {
+  URL                        string
+  Title                      string
+}
 
 type CanardItem struct {
   *Item
@@ -26,7 +42,11 @@ type CanardItem struct {
 type Canard struct {
   App                        *tview.Application
   FeedSwitcher               *tview.DropDown
+
   ItemsList                  *tview.List
+  ItemsListIndexMap          map[int]int
+
+  ItemReader                 *tview.TextView
   Grid                       *tview.Grid
 
   ApiURL                     string
@@ -69,6 +89,7 @@ type ApiResponse struct {
 
 func main() {
   canard := Canard{
+    ItemsListIndexMap: make(map[int]int),
     ItemsMap: make(map[int]int),
     CurrentFeedID: -1,
   }
@@ -80,30 +101,121 @@ func main() {
     "CANARD_API_KEY",
     "9a0f36d70a22b40baa26f3df113cd9eb",
   )
+  glamourStyle := LookupStrEnv(
+    "GLAMOUR_STYLE",
+    "",
+  )
+  if glamourStyle == "" {
+    log.Fatal("Please `export GLAMOUR_STYLE` with the style you would like to use, e.g. 'dark'!")
+  }
 
-  // tview.Styles = tview.Theme{
-  //   PrimitiveBackgroundColor:    tcell.ColorDefault,
-  //   ContrastBackgroundColor:     tcell.ColorTeal,
-  //   MoreContrastBackgroundColor: tcell.ColorTeal,
-  //   BorderColor:                 tcell.ColorWhite,
-  //   TitleColor:                  tcell.ColorWhite,
-  //   GraphicsColor:               tcell.ColorWhite,
-  //   PrimaryTextColor:            tcell.ColorDefault,
-  //   SecondaryTextColor:          tcell.ColorBlue,
-  //   TertiaryTextColor:           tcell.ColorGreen,
-  //   InverseTextColor:            tcell.ColorBlack,
-  //   ContrastSecondaryTextColor:  tcell.ColorDarkCyan,
-  // }
+  tview.Styles = tview.Theme{
+    PrimitiveBackgroundColor:    tcell.ColorDefault,
+    ContrastBackgroundColor:     tcell.ColorTeal,
+    MoreContrastBackgroundColor: tcell.ColorTeal,
+    BorderColor:                 tcell.ColorWhite,
+    TitleColor:                  tcell.ColorWhite,
+    GraphicsColor:               tcell.ColorWhite,
+    PrimaryTextColor:            tcell.ColorDefault,
+    SecondaryTextColor:          tcell.ColorBlue,
+    TertiaryTextColor:           tcell.ColorGreen,
+    InverseTextColor:            tcell.ColorBlack,
+    ContrastSecondaryTextColor:  tcell.ColorDarkCyan,
+  }
 
   canard.App = tview.NewApplication()
 
   canard.FeedSwitcher = tview.NewDropDown().
-    SetLabel("Feed: ")
+    SetFieldBackgroundColor(tcell.ColorDefault)
+
+  canard.ItemReader = tview.NewTextView().
+    SetDynamicColors(true).
+    SetRegions(true).
+    SetWrap(true).
+    SetDoneFunc(func(key tcell.Key)() {
+      canard.App.SetRoot(canard.Grid, true)
+      return
+    })
 
   canard.ItemsList = tview.NewList().
     SetWrapAround(true).
     SetHighlightFullLine(true).
-    SetSecondaryTextColor(tcell.ColorGrey)
+    SetSelectedBackgroundColor(tcell.ColorTeal).
+    SetSecondaryTextColor(tcell.ColorGrey).
+    SetSelectedFunc(
+      func(index int, text string, secondaryText string, shortcut rune) {
+        item := canard.Items[canard.ItemsListIndexMap[index]]
+
+        markdown := item.Markdown
+
+        var images []InlineImage
+
+        markdown = MdImgRegex.ReplaceAllStringFunc(markdown, func(md string) (string) {
+          imgs := MdImgRegex.FindAllStringSubmatch(md, -1)
+          if len(imgs) < 1 {
+            return md
+          }
+
+          img := imgs[0]
+
+          inlineImage := InlineImage{
+            Title: img[1],
+            URL: img[2],
+          }
+
+          inlineImageIndex := len(images)
+          images = append(images, inlineImage)
+
+          return fmt.Sprintf(" 🖼%d$ ", inlineImageIndex)
+        })
+
+        output, err :=
+          glamour.RenderWithEnvironmentConfig(
+            fmt.Sprintf("# %s\n\n%s", item.Title, markdown),
+          )
+        if err != nil {
+          output = fmt.Sprintf("%v", err)
+        } else {
+          output = MdImgPlaceholderRegex.ReplaceAllStringFunc(output, func(md string) (string) {
+            imgs := MdImgPlaceholderRegex.FindAllStringSubmatch(md, -1)
+            if len(imgs) < 1 {
+              return md
+            }
+
+            img := imgs[0]
+
+            imgIndex, err := strconv.Atoi(img[1])
+            if err != nil {
+              return md
+            }
+
+            imgURL := images[imgIndex].URL
+
+            width := 80
+
+            pix, err := ansimage.NewScaledFromURL(
+              imgURL,
+              int((float64(width) * 0.75)),
+              width,
+              color.Transparent,
+              ansimage.ScaleModeResize,
+              ansimage.NoDithering,
+            )
+            if err != nil {
+              return md
+            }
+
+            return pix.RenderExt(false, false)
+          })
+        }
+
+
+        canard.ItemReader.Clear()
+        fmt.Fprint(canard.ItemReader, tview.TranslateANSI(output))
+        canard.ItemReader.ScrollToBeginning()
+        canard.App.SetRoot(canard.ItemReader, true)
+      },
+    )
 
   canard.Grid = tview.NewGrid().
     SetRows(1, 0).
@@ -216,10 +328,14 @@ func (canard *Canard) RefreshUI() (bool) {
   }
 
   canard.ItemsList.Clear()
-  for _, item := range canard.Items {
+  canard.ItemsListIndexMap = make(map[int]int)
+  for i := 0; i < len(canard.Items); i++ {
+    item := canard.Items[i]
     if item.FeedID == canard.CurrentFeedID ||
        canard.CurrentFeedID == -1 {
       canard.ItemsList.AddItem(item.Title, item.FeedTitle, 0, nil)
+      itemListIndex := (canard.ItemsList.GetItemCount() - 1)
+      canard.ItemsListIndexMap[itemListIndex] = i
     }
   }
 

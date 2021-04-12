@@ -21,9 +21,9 @@ import (
 
 var VERSION string
 var MdImgRegex =
-  regexp.MustCompile(`(?m)!\[(.*)\]\((.+)\)`)
+  regexp.MustCompile(`(?m)\[{0,1}!\[(:?\]\(.*\)){0,1}(.*)\]\((.+)\)`)
 var MdImgPlaceholderRegex =
-  regexp.MustCompile(`(?m) 🖼([0-9]*)\$`)
+  regexp.MustCompile(`(?m)🖼([0-9]*)\$`)
 
 
 type InlineImage struct {
@@ -147,7 +147,7 @@ func main() {
         item := canard.Items[canard.ItemsListIndexMap[index]]
 
         markdown := item.Markdown
-
+        print(markdown)
         var images []InlineImage
 
         markdown = MdImgRegex.ReplaceAllStringFunc(markdown, func(md string) (string) {
@@ -157,16 +157,24 @@ func main() {
           }
 
           img := imgs[0]
-
+          print("\n")
+          print(img[0])
+          print("\n")
+          print(img[1])
+          print("\n")
+          print(img[2])
+          print("\n")
+          print(img[3])
+          print("\n")
           inlineImage := InlineImage{
-            Title: img[1],
-            URL: img[2],
+            Title: img[2],
+            URL: img[3],
           }
 
           inlineImageIndex := len(images)
           images = append(images, inlineImage)
 
-          return fmt.Sprintf(" 🖼%d$ ", inlineImageIndex)
+          return fmt.Sprintf("🖼%d$", inlineImageIndex)
         })
 
         output, err :=
@@ -189,9 +197,10 @@ func main() {
               return md
             }
 
+            imgTitle := images[imgIndex].Title
             imgURL := images[imgIndex].URL
 
-            width := 80
+            _, _, width, _ := canard.ItemsList.Box.GetInnerRect()
 
             pix, err := ansimage.NewScaledFromURL(
               imgURL,
@@ -205,7 +214,7 @@ func main() {
               return md
             }
 
-            return pix.RenderExt(false, false)
+            return fmt.Sprintf("\n%s\n  [grey]%s[-]", pix.RenderExt(false, false), imgTitle)
           })
         }
 

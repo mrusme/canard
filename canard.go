@@ -2,13 +2,7 @@ package main
 
 import (
   "log"
-  "time"
-  "bytes"
   "strings"
-  "io"
-  "net/http"
-  "mime/multipart"
-  "encoding/json"
 
   "github.com/gdamore/tcell/v2"
   "github.com/rivo/tview"
@@ -78,8 +72,14 @@ func main() {
     ItemsMap: make(map[int]int),
     CurrentFeedID: -1,
   }
-  canard.ApiURL = LookupStrEnv("CANARD_API_URL", "http://127.0.0.1:8000/fever/")
-  canard.ApiKey = LookupStrEnv("CANARD_API_KEY", "9a0f36d70a22b40baa26f3df113cd9eb")
+  canard.ApiURL = LookupStrEnv(
+    "CANARD_API_URL",
+    "http://127.0.0.1:8000/fever/",
+  )
+  canard.ApiKey = LookupStrEnv(
+    "CANARD_API_KEY",
+    "9a0f36d70a22b40baa26f3df113cd9eb",
+  )
 
   // tview.Styles = tview.Theme{
   //   PrimitiveBackgroundColor:    tcell.ColorDefault,
@@ -98,8 +98,7 @@ func main() {
   canard.App = tview.NewApplication()
 
   canard.FeedSwitcher = tview.NewDropDown().
-    SetLabel("Feed: ").
-    SetOptions([]string{"All"}, nil)
+    SetLabel("Feed: ")
 
   canard.ItemsList = tview.NewList().
     SetWrapAround(true).
@@ -110,8 +109,25 @@ func main() {
     SetRows(1, 0).
     SetColumns(0).
     SetBorders(true).
-    AddItem(canard.FeedSwitcher, 0, 0, 1, 1, 0, 0, true).
-    AddItem(canard.ItemsList, 1, 0, 1, 1, 0, 0, false)
+    AddItem(canard.FeedSwitcher, 0, 0, 1, 1, 0, 0, false).
+    AddItem(canard.ItemsList, 1, 0, 1, 1, 0, 0, true)
+
+  canard.App.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+    switch event.Key() {
+    case tcell.KeyCtrlT:
+      if canard.FeedSwitcher.HasFocus() == false {
+        canard.App.SetFocus(canard.FeedSwitcher)
+        canard.App.QueueEvent(tcell.NewEventKey(tcell.KeyDown, 0, tcell.ModNone))
+      } else {
+        canard.App.SetFocus(canard.ItemsList)
+      }
+      return nil
+    case tcell.KeyCtrlQ:
+      canard.App.Stop()
+    }
+
+    return event
+  })
 
   canard.Refresh()
   canard.RefreshUI()
@@ -120,40 +136,6 @@ func main() {
   if err := canard.App.SetRoot(canard.Grid, true).Run(); err != nil {
     panic(err)
   }
-}
-
-func call(apiKey string, urlPath string) (ApiResponse, error) {
-  client := &http.Client{
-    Timeout: time.Second * 10,
-  }
-  body := &bytes.Buffer{}
-  writer := multipart.NewWriter(body)
-  fw, err := writer.CreateFormField("api_key")
-  if err != nil {
-  }
-  _, err = io.Copy(fw, strings.NewReader(apiKey))
-  if err != nil {
-      return ApiResponse{}, err
-  }
-  writer.Close()
-  req, err := http.NewRequest("POST", urlPath, bytes.NewReader(body.Bytes()))
-  if err != nil {
-      return ApiResponse{}, err
-  }
-  req.Header.Set("Content-Type", writer.FormDataContentType())
-  resp, _ := client.Do(req)
-  if resp.StatusCode != http.StatusOK {
-    log.Printf("Request failed with response code: %d", resp.StatusCode)
-  }
-
-  defer resp.Body.Close()
-
-  var response ApiResponse
-  if err := json.NewDecoder(resp.Body).Decode(&response); err != nil {
-    log.Fatal(err)
-  }
-
-  return response, nil
 }
 
 func (canard *Canard) Refresh() () {
@@ -197,7 +179,17 @@ func (canard *Canard) Refresh() () {
   }
 }
 
+func (canard *Canard) SwitchByID(feedID int) (bool) {
+  canard.CurrentFeedID = feedID
+  return true
+}
+
 func (canard *Canard) Switch(feedTitle string) (bool) {
+  if feedTitle == "All" {
+    canard.CurrentFeedID = -1
+    return true
+  }
+
   for _, feed := range canard.Feeds {
     if feedTitle == feed.Title {
       canard.CurrentFeedID = feed.ID
@@ -209,20 +201,26 @@ func (canard *Canard) Switch(feedTitle string) (bool) {
 }
 
 func (canard *Canard) RefreshUI() (bool) {
-  canard.FeedSwitcher.SetOptions([]string{"All"}, nil)
+  canard.FeedSwitcher.SetOptions(
+    []string{"All"},
+    func(text string, index int) {
+      canard.Switch(text)
+      canard.RefreshUI()
+      canard.App.SetFocus(canard.ItemsList)
+    },
+  )
 
   for i := 0; i < len(canard.Feeds); i++ {
     feed := canard.Feeds[i]
     canard.FeedSwitcher.AddOption(feed.Title, nil)
-
-    if canard.CurrentFeedID == feed.ID {
-      canard.FeedSwitcher.SetCurrentOption(i)
-    }
   }
 
   canard.ItemsList.Clear()
   for _, item := range canard.Items {
-    canard.ItemsList.AddItem(item.Title, item.FeedTitle, 0, nil)
+    if item.FeedID == canard.CurrentFeedID ||
+       canard.CurrentFeedID == -1 {
+      canard.ItemsList.AddItem(item.Title, item.FeedTitle, 0, nil)
+    }
   }
 
   canard.ItemsList.SetCurrentItem(-1)

@@ -147,7 +147,6 @@ func main() {
         item := canard.Items[canard.ItemsListIndexMap[index]]
 
         markdown := item.Markdown
-        print(markdown)
         var images []InlineImage
 
         markdown = MdImgRegex.ReplaceAllStringFunc(markdown, func(md string) (string) {
@@ -157,15 +156,6 @@ func main() {
           }
 
           img := imgs[0]
-          print("\n")
-          print(img[0])
-          print("\n")
-          print(img[1])
-          print("\n")
-          print(img[2])
-          print("\n")
-          print(img[3])
-          print("\n")
           inlineImage := InlineImage{
             Title: img[2],
             URL: img[3],
@@ -243,10 +233,53 @@ func main() {
         canard.App.SetFocus(canard.ItemsList)
       }
       return nil
+    case tcell.KeyCtrlR:
+      canard.Refresh()
+      canard.RefreshUI()
+      return nil
     case tcell.KeyCtrlQ:
       canard.App.Stop()
-    }
+    case tcell.KeyRune:
+      eventRune := event.Rune()
+      switch eventRune {
+      case 'q':
+        if canard.ItemReader.HasFocus() == true {
+          canard.App.QueueEvent(tcell.NewEventKey(tcell.KeyEsc, 0, tcell.ModNone))
+          return nil
+        } else if canard.ItemsList.HasFocus() == true {
+          canard.App.Stop()
+        }
+      case 'u', 'd', 'b', 'f':
+        if canard.ItemReader.HasFocus() == true {
 
+          _, _, _, h := canard.ItemReader.Box.GetRect()
+          currentLine, _ := canard.ItemReader.GetScrollOffset()
+
+          var scrollLength int = 0
+          if eventRune == 'u' || eventRune == 'd' {
+            scrollLength = int((h / 2))
+          } else if eventRune == 'b' || eventRune == 'f' {
+            scrollLength = h
+          }
+
+          var scrollTo int = currentLine
+
+          if eventRune == 'u' || eventRune == 'b' {
+            scrollTo = currentLine - scrollLength
+          } else if eventRune == 'd' || eventRune == 'f' {
+            scrollTo = currentLine + scrollLength
+          }
+
+          if scrollTo < 0 {
+            scrollTo = 0
+          }
+
+          canard.ItemReader.ScrollTo(scrollTo, 0)
+
+          return nil
+        }
+      }
+    }
     return event
   })
 

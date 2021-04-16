@@ -3,7 +3,7 @@
 Canard. A command line TUI client for the 
 [Journalist](https://マリウス.com/journalist-an-rss-aggregator/) RSS aggregator.
 
-<iframe src="https://player.vimeo.com/video/535676709" width="640" height="400" frameborder="0" allow="autoplay; fullscreen" allowfullscreen></iframe>
+![[Canard](https://player.vimeo.com/video/535676709)](canard.jpg)
 
 
 ## Installation

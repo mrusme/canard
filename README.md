@@ -5,7 +5,10 @@ Canard. A command line TUI client for the
 
 ![[Canard](https://player.vimeo.com/video/535676709)](canard.jpg)
 
-***Note: This version of Canard is not yet compatible with Journalist >= v1.0.0!***
+***Note: Canard is not compatible with Journalist v1.0.0 or newer and will soon 
+be merged into [Neon Modem Overdrive](https://github.com/mrusme/neonmodem)! Neon 
+Modem will support Journalist v1.0.0 and newer.***
+
 
 ## Installation
 
